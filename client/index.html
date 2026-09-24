@@ -1,0 +1,182 @@
+<!-- client/index.html -->
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <title>Motor RPG - Sprites e Assets</title>
+  <style>
+    body {
+      background-color: #121212;
+      color: #ffffff;
+      font-family: monospace;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      height: 100vh;
+      margin: 0;
+    }
+    #gameCanvas {
+      border: 3px solid #333;
+      background-color: #000;
+      box-shadow: 0 0 20px rgba(0,0,0,0.8);
+      image-rendering: pixelated; /* Mantém o estilo retro sem desfocar os pixels */
+    }
+    #ui {
+      margin-top: 10px;
+      font-size: 14px;
+      color: #aaa;
+    }
+  </style>
+</head>
+<body>
+
+  <h1>Motor RPG 2D - Teste de Sprites</h1>
+  <canvas id="gameCanvas" width="800" height="600"></canvas>
+  <div id="ui">Controles: WASD ou Setas do teclado.</div>
+
+  <script>
+    // --- 1. GERENCIADOR DE ASSETS INTERNO ---
+    class AssetManager {
+      constructor() {
+        this.images = {};
+      }
+
+      // Carrega uma imagem a partir de um caminho local
+      loadImage(key, src) {
+        return new Promise((resolve) => {
+          const img = new Image();
+          img.src = src;
+          img.onload = () => {
+            this.images[key] = img;
+            console.log(`🖼️ Asset carregado: ${key}`);
+            resolve(img);
+          };
+          img.onerror = () => {
+            console.warn(`⚠️ Erro ao carregar asset: ${key} (${src}). Usando fallback.`);
+            resolve(null);
+          };
+        });
+      }
+
+      get(key) {
+        return this.images[key] || null;
+      }
+    }
+
+    const assets = new AssetManager();
+    const canvas = document.getElementById('gameCanvas');
+    const ctx = canvas.getContext('2d');
+
+    let myPlayerId = null;
+    let gameStatePlayers = [];
+    let socket = null;
+
+    const inputs = { up: false, down: false, left: false, right: false };
+
+    // --- 2. INICIALIZAÇÃO DO JOGO (Pré-carrega assets antes de conectar) ---
+    async function init() {
+      console.log('📦 Carregando Pacote de Assets Interno...');
+      
+      // Carrega o sprite do jogador a partir do pacote interno local
+      await assets.loadImage('player', 'assets/player.png');
+
+      // Conecta ao servidor após carregar os recursos visuais
+      connectServer();
+    }
+
+    function connectServer() {
+      socket = new WebSocket('ws://localhost:8080');
+
+      socket.onopen = () => console.log('🟢 Conectado ao servidor!');
+
+      socket.onmessage = (event) => {
+        const data = JSON.parse(event.data);
+
+        if (data.type === 'INIT') {
+          myPlayerId = data.id;
+        }
+
+        if (data.type === 'TICK_UPDATE') {
+          gameStatePlayers = data.players;
+          render();
+        }
+      };
+
+      socket.onclose = () => console.log('🔴 Desconectado.');
+    }
+
+    // --- 3. CONTROLE DE TECLADO ---
+    window.addEventListener('keydown', (e) => handleKey(e.key, true));
+    window.addEventListener('keyup', (e) => handleKey(e.key, false));
+
+    function handleKey(key, isPressed) {
+      let changed = false;
+      const k = key.toLowerCase();
+
+      if (k === 'w' || k === 'arrowup') { if (inputs.up !== isPressed) changed = true; inputs.up = isPressed; }
+      if (k === 's' || k === 'arrowdown') { if (inputs.down !== isPressed) changed = true; inputs.down = isPressed; }
+      if (k === 'a' || k === 'arrowleft') { if (inputs.left !== isPressed) changed = true; inputs.left = isPressed; }
+      if (k === 'd' || k === 'arrowright') { if (inputs.right !== isPressed) changed = true; inputs.right = isPressed; }
+
+      if (changed && socket && socket.readyState === WebSocket.OPEN) {
+        socket.send(JSON.stringify({ type: 'INPUT', inputs: inputs }));
+      }
+    }
+
+    // --- 4. RENDERIZAÇÃO ---
+    function render() {
+      // Limpa a tela
+      ctx.fillStyle = '#000000';
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+      // Grade de fundo
+      ctx.strokeStyle = '#111111';
+      ctx.lineWidth = 1;
+      for (let x = 0; x < canvas.width; x += 40) {
+        ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, canvas.height); ctx.stroke();
+      }
+      for (let y = 0; y < canvas.height; y += 40) {
+        ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(canvas.width, y); ctx.stroke();
+      }
+
+      // Desenha os jogadores
+      gameStatePlayers.forEach(player => {
+        const size = 32;
+        const playerSprite = assets.get('player');
+
+        if (playerSprite) {
+          // Desenha a imagem/sprite do jogador centralizada na coordenada (X,Y)
+          ctx.drawImage(
+            playerSprite, 
+            player.x - size / 2, 
+            player.y - size / 2, 
+            size, 
+            size
+          );
+        } else {
+          // Fallback visual se a imagem não for encontrada
+          ctx.fillStyle = player.color;
+          ctx.fillRect(player.x - size / 2, player.y - size / 2, size, size);
+        }
+
+        // Destaque visual no seu próprio jogador
+        if (player.id === myPlayerId) {
+          ctx.strokeStyle = '#00ff00';
+          ctx.lineWidth = 2;
+          ctx.strokeRect(player.x - size / 2, player.y - size / 2, size, size);
+        }
+
+        // Nome / ID em cima da entidade
+        ctx.fillStyle = '#ffffff';
+        ctx.font = '12px monospace';
+        ctx.textAlign = 'center';
+        ctx.fillText(player.id, player.x, player.y - size / 2 - 5);
+      });
+    }
+
+    // Inicia o motor
+    init();
+  </script>
+</body>
+</html>
